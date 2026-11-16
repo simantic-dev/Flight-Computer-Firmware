@@ -4,8 +4,9 @@ Fork-only showcase: the team's own Rev 2 flight firmware (`app/rev2`, A0002-Rev2
 labelled sim-only patch, run on the simantic `sim` with Python peers standing in for the sensors.
 Upstream is SunDevilRocketry/Flight-Computer-Firmware; nothing here is sent upstream.
 
-**Status: partial.** The firmware boots, talks to every peer, reaches IDLE and CALIB, then stops in
-`error_fail_fast(0x3d)` from `telemetry_init`. No launch, ascent, apogee or descent has been simulated yet and no
+**Status: partial.** The firmware boots (IDLE 0.92 s virtual), arms at 3 s, calibrates, initialises LoRa
+without error and enters LAUNCH_DETECT at 3.56 s virtual. After about 4.06 s virtual the flight loop stops
+reading sensors (cause not yet found, see Open), so no launch, ascent, apogee or descent has been simulated and no
 flight plots exist. Nothing below claims otherwise.
 
 ## What runs
@@ -16,24 +17,36 @@ flight plots exist. Nothing below claims otherwise.
 | BMI270 IMU | `peers/bmi270_peer.py` | I2C2 0x68 | answers; accepts the config upload, serves accel/gyro from the CSV |
 | BMM150 mag | `peers/bmm150_peer.py` | I2C2 0x10 | answers; constant raw field and trims |
 | SST25 4 Mbit flash | `peers/sst25_peer.py` | SPI2 CS PB12 | answers; file-backed (`out/flash.bin`) |
-| RFM95 / SX1276 LoRa | `peers/sx1276_peer.py` | SPI4 CS PC0 | answers ID 0x12 and register writes; first version, see Open |
+| RFM95 / SX1276 LoRa | `peers/sx1276_peer.py` | SPI4 CS PC0 | answers ID 0x12 and register writes; `lora_init` completes OK |
 | Arm switch | `peers/arm_switch_peer.py` | PD7 | low at boot, raised at 3 s |
 
 `flightdata.py` replays `emulator/resources/locked_in_flight.csv` (team emulator submodule, BSD-3) open loop.
 Whether that CSV is a recorded flight is `unverified`.
 
 Run: `sh sim/build.sh` then `cd sim && sim run --scenario scenario.yaml --timeout 14 --trace-symbol fc_state_update`.
-`decode_flash.py` decodes the flight log from `out/flash.bin` (untested: no flight frames were written yet).
+`decode_flash.py` decodes the flight log from `out/flash.bin` (layout read from `flash_appa.c`; no real flight frames decoded yet).
 
 ## Measured (sim 0.10.1, this scenario)
 
 | Observation | Value |
 | --- | --- |
-| Boot to IDLE (`fc_state_update` r0=1) | 9.599 s virtual |
-| CALIB (r0=2) | 9.803 s virtual |
-| `error_fail_fast` r0=0x3d | 10.366 s virtual, immediately after a LoRa register sequence ending in a write of 0x81 to OpMode |
-| SPI2 flash transactions in the first 11 s | 551 680 (boot spends most of its time reading flash) |
+| Boot to IDLE (`fc_state_update` r0=1) | 0.925 s virtual (was 9.6 s with a blank flash) |
+| CALIB (r0=2), armed at 3 s | 3.000 s virtual |
+| 50 calibration samples (`sensor_dump`) | 3.41 s to 4.06 s virtual |
+| LAUNCH_DETECT (r0=3) | 3.563 s virtual, `telemetry_init` returns OK |
+| `sensor_dump` calls after 4.06 s | none to 6 s virtual (`unverified` why) |
 | Image | text 82136 B, data 8700 B, bss 6340 B |
+
+## Root causes found
+
+- **0x3d (`telemetry_init` LoRa assert) was not a peer fault.** `lora_configure` returned `LORA_USING_DEFAULTS`
+  (8) because the preset in RAM was all 0xFF. `lora_init` itself returns OK on every status (all HAL calls OK,
+  peer sees the expected register sequence). The preset was lost in the SST25 peer: AAI word-program
+  continuation frames carry no address but the peer reset its address to 0 after every frame, so the whole
+  preset (and later flight frames) were programmed at address 0. Fixed in `peers/sst25_peer.py`.
+- **551k SPI2 transactions** were `read_preset` scanning the whole blank 512 KB flash in 98-byte reads looking
+  for a save bit. The flash now starts with a preset block (MODELED SIMPLIFICATION: stands for what the team's
+  configuration tool writes; `set_default_configs` values plus WIRELESS_TRANSMISSION and a valid LoRa preset).
 
 ## MODELED SIMPLIFICATIONS
 
@@ -45,13 +58,21 @@ Run: `sh sim/build.sh` then `cd sim && sim run --scenario scenario.yaml --timeou
 - **Peers** are register files, not the silicon: instant flash program/erase, always-ready data, chosen BMP390
   NVM coefficients, constant magnetometer field, instant LoRa TX, no noise.
 
-## Sim-only build patch (`lora-pll2.patch`)
+## Sim-only build patch (`lora-pll2.patch`) and the PLL2 question
 
-The SPI4 (LoRa) branch of `HAL_SPI_MspInit` calls `HAL_RCCEx_PeriphCLKConfig` with a zeroed `PLL2` struct
-(M = 0), so the HAL re-enables PLL2 with DIVM2 = 0 and waits for PLL2RDY, which times out after 2 ms and ends in
-`ERROR_LORA_SPI_INIT_ERROR` (0x3c) at 4.08 ms. The patch gives it the PLL2 values the SPI2 branch already uses.
-Whether silicon behaves the same with DIVM2 = 0 is `unverified` (not checked against RM0433), so this is not
-claimed as a model bug or as a firmware bug. `build.sh` applies the patch for the build and reverts it.
+The SPI4 (LoRa) branch of `HAL_SPI_MspInit` calls `HAL_RCCEx_PeriphCLKConfig` with a zero-initialised `PLL2`
+struct (M = 0, N = 0). With `Spi45ClockSelection = PLL2` the HAL takes `RCCEx_PLL2_Config(..., DIVIDER_Q_UPDATE)`:
+it disables PLL2 (the SPI2 branch had configured it), writes DIVM2 = 0, enables PLL2 and polls PLL2RDY for 2 ms,
+returning HAL_TIMEOUT, so `error_fail_fast(ERROR_LORA_SPI_INIT_ERROR)` (0x3c) at 4.08 ms.
+
+Evidence: RM0433 (RCC_PLLCKSELR) says DIVM2 = 0 is "prescaler disabled" and that 0 is to be used when PLL2 is
+not used; the pyrite H7 RCC model (`stm32h7_rcc.rs`) implements exactly that: PLLxRDY needs PLLxON, a ready
+reference and DIVMx != 0, and its PLL lock timings are from H753 bench measurements. The model follows the manual;
+the sim differs from silicon only if silicon sets PLL2RDY with DIVM2 = 0, which neither the RM nor the model's
+bench data supports. Verdict: a firmware configuration defect (the struct was meant to carry the SPI2 values),
+expected to fail the same way on silicon. Not measured on silicon (`unverified`; no H750 rig here). The
+reconfiguration would also drop the SPI2 flash clock. The patch gives the SPI4 branch the SPI2 branch's PLL2
+values and is applied for the build only by `build.sh`.
 
 ## Firmware fact: dual deploy cannot fire
 
@@ -62,9 +83,11 @@ firmware, not of the sim.
 
 ## Open
 
-- `telemetry_init` fails after `lora_configure`. The peer saw the ID read and a long register write sequence;
-  which check in `lora_configure` returns non-OK is not yet found.
-- Then: arm, calibrate, launch detect through descent, decode the flash log, plot, and measure the numbers.
+- Flight loop silent after 4.06 s virtual (LAUNCH_DETECT reached, no further `sensor_dump`). Next step: find the
+  PC it waits at (candidate: the async LoRa FSM TX completion, which needs SPI4 interrupt-mode transfers and
+  `lora_fsm_update` callbacks).
+- Then: launch detect through descent, decode the flash log, plot. The CSV must start after LAUNCH_DETECT is
+  entered (`SDR_LAUNCH_S=12`), not at 8 s.
 - A full 196 s virtual run may exceed the 5-minute wall rule; if so it will be truncated after descent and say so.
 
 ## Licence
