@@ -1,0 +1,4 @@
+// Sun Devil Rocketry Rev 2 flight computer (A0002-Rev2, STM32H750VBT6) on an STM32H743VG stand-in.
+// The 24 MHz HSE is the firmware's HSE_VALUE (init/rev2/config/Inc/stm32h7xx_hal_conf.h).
+rcc:
+    hseFrequency: 24000000
