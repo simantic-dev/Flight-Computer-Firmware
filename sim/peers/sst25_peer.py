@@ -6,13 +6,14 @@
 import mmap, os, struct
 
 SIZE = 0x80000
+# SDR_LORA=0 drops WIRELESS_TRANSMISSION: LABELLED FALLBACK, see README (LoRa FSM starves the flight loop in the sim).
 PATH = os.environ.get("SDR_FLASH", "out/flash.bin")
 os.makedirs(os.path.dirname(PATH) or ".", exist_ok=True)
 # Preset at flash address 0 (app/rev2/flash_appa.c read_preset: save bit 1, pad, PRESET_DATA 96 B). Stands for what
 # the team's configuration tool writes before flight. Values are set_default_configs() plus WIRELESS_TRANSMISSION
 # (bit 4) and a valid LoRa preset (SF7, 125 kHz, 4/5, 915 MHz); a blank flash makes read_preset scan all 512 KB
 # in 98-byte reads (551k SPI transactions) and leaves preset_data blank.
-_cfg = struct.pack("<IIHHHBBBxHBBH6f", 0x01 | 0x40 | 0x10, 0xFFFFFFFF, 50, 30000, 300, 2, 5, 5, 0, 7, 0, 4000,
+_cfg = struct.pack("<IIHHHBBBxHBBH6f", 0x01 | 0x40 | (0x10 if os.environ.get("SDR_LORA", "1") == "1" else 0), 0xFFFFFFFF, 50, 30000, 300, 2, 5, 5, 0, 7, 0, 4000,
                    *([0.0] * 6))
 _preset = struct.pack("<I", 0) + _cfg + struct.pack("<BBBBI", 7, 7, 5, 0, 915000) + bytes(24 + 8 + 4)
 assert len(_cfg) == 48 and len(_preset) == 96

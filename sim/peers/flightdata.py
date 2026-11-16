@@ -9,7 +9,7 @@ import bisect, csv, math, os
 HERE = os.path.dirname(os.path.abspath(__file__))
 CSV = os.path.join(HERE, "..", "..", "emulator", "resources", "locked_in_flight.csv")
 LAUNCH_S = float(os.environ.get("SDR_LAUNCH_S", "8.0"))   # sim time at which CSV time 0 plays
-PAD_END_S = 0.7                                            # boost starts at csv t = 0.735 s
+PAD_END_S = 0.6                                            # boost starts at csv t = 0.65 s (ax 45 m/s2), so the cycled pad rows end at 0.6 s
 
 # Firmware compensation (driver/baro/baro.c load_cal_data) fed by the NVM bytes the baro peer serves.
 T1, T2, T3 = 27000, 19000, -10

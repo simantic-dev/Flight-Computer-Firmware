@@ -4,10 +4,16 @@ Fork-only showcase: the team's own Rev 2 flight firmware (`app/rev2`, A0002-Rev2
 labelled sim-only patch, run on the simantic `sim` with Python peers standing in for the sensors.
 Upstream is SunDevilRocketry/Flight-Computer-Firmware; nothing here is sent upstream.
 
-**Status: partial.** The firmware boots (IDLE 0.92 s virtual), arms at 3 s, calibrates, initialises LoRa
-without error and enters LAUNCH_DETECT at 3.56 s virtual. After about 4.06 s virtual the flight loop stops
-reading sensors (cause not yet found, see Open), so no launch, ascent, apogee or descent has been simulated and no
-flight plots exist. Nothing below claims otherwise.
+**Status: flies, with one labelled fallback.** The firmware boots (IDLE 0.92 s virtual), arms at 3 s, calibrates,
+enters LAUNCH_DETECT, and with LoRa telemetry off (`SDR_LORA=0`, see "LoRa stall") runs its flight loop at about
+420 Hz through ASCENT, APOGEE and DESCENT while replaying the team's `locked_in_flight.csv` open loop. The logged
+flight is only the first 8.9 s of the CSV, because the 512 KB flash fills (4442 frames of 118 B). With LoRa on the
+flight loop stalls after 4.06 s (cause below). Nothing here is a claim about silicon.
+
+![flight](results/flight.png)
+![states](results/states.png)
+
+`results/flight_full.png` adds the whole 188 s CSV truth beside the logged window.
 
 ## What runs
 
@@ -23,8 +29,32 @@ flight plots exist. Nothing below claims otherwise.
 `flightdata.py` replays `emulator/resources/locked_in_flight.csv` (team emulator submodule, BSD-3) open loop.
 Whether that CSV is a recorded flight is `unverified`.
 
-Run: `sh sim/build.sh` then `cd sim && sim run --scenario scenario.yaml --timeout 14 --trace-symbol fc_state_update`.
-`decode_flash.py` decodes the flight log from `out/flash.bin` (layout read from `flash_appa.c`; no real flight frames decoded yet).
+Run: `sh sim/build.sh`, then
+`cd sim && SDR_LAUNCH_S=6 SDR_LORA=0 sim run --scenario scenario.yaml --timeout 196 --trace-symbol fc_state_update`
+(about 98 s wall on an idle machine), then `python3 decode_flash.py out/flash.bin > out/frames.csv` and
+`python plot_flight.py out/frames.csv <the --trace-symbol log> results` (needs matplotlib).
+`decode_flash.py` reads the 118-byte frames (layout from `flash_appa.c`; 4442 frames decoded, the values match the CSV).
+
+```mermaid
+flowchart LR
+  fc["fc<br/>STM32H743VG"]
+  fc_spi2mux(["spi2mux<br/>SPI.SPIMultiplexer"])
+  fc -- "spi2" --- fc_spi2mux
+  fc_spi4mux(["spi4mux<br/>SPI.SPIMultiplexer"])
+  fc -- "spi4" --- fc_spi4mux
+  fc_baro(["baro<br/>I2C.ScriptedI2cSlave"])
+  fc -- "i2c1 0x76" --- fc_baro
+  fc_imu(["imu<br/>I2C.ScriptedI2cSlave"])
+  fc -- "i2c2 0x68" --- fc_imu
+  fc_mag(["mag<br/>I2C.ScriptedI2cSlave"])
+  fc -- "i2c2 0x10" --- fc_mag
+  fc_flash(["flash<br/>SPI.ScriptedSpiSlave"])
+  fc -- "spi2mux 0x0" --- fc_flash
+  fc_lora(["lora<br/>SPI.ScriptedSpiSlave"])
+  fc -- "spi4mux 0x0" --- fc_lora
+  fc_arm(["arm<br/>Scripted.ScriptedGpioPeer"])
+  fc -- "sysbus" --- fc_arm
+```
 
 ## Measured (sim 0.10.1, this scenario)
 
@@ -34,7 +64,15 @@ Run: `sh sim/build.sh` then `cd sim && sim run --scenario scenario.yaml --timeou
 | CALIB (r0=2), armed at 3 s | 3.000 s virtual |
 | 50 calibration samples (`sensor_dump`) | 3.41 s to 4.06 s virtual |
 | LAUNCH_DETECT (r0=3) | 3.563 s virtual, `telemetry_init` returns OK |
-| `sensor_dump` calls after 4.06 s | none to 6 s virtual (`unverified` why) |
+| `sensor_dump` calls after 4.06 s, LoRa on | none to 7 s: starved by the SPI4 interrupt chain (below) |
+| LoRa off, `SDR_LAUNCH_S=6`: `sensor_dump` / `nav_update` | 2512 each in the first 10 s (about 420 Hz) |
+| LoRa off: ASCENT (r0=4) | 6.638 s = CSV t 0.638 s |
+| LoRa off: APOGEE (r0=6) then DESCENT (r0=7) | 7.9015 s / 7.9029 s = CSV t 1.90 s (not the CSV's 18 s apogee, see below) |
+| COAST (r0=5) | never entered |
+| Flash log | full at 4442 frames (524,288 B), last frame CSV t 8.9 s |
+| Firmware vs CSV, visual | baro_alt, baro_pres and ax overlay the CSV truth over the whole logged window (`results/flight.png`); no numeric error computed (`unverified`) |
+| Wall time, 196 s virtual | 97.7 s |
+| GPIO edges (`--trace-out`, 44 s virtual) | 178 MB of JSONL, mostly SPI2 pads: too big to keep, not committed |
 | Image | text 82136 B, data 8700 B, bss 6340 B |
 
 ## Root causes found
@@ -56,7 +94,7 @@ Run: `sh sim/build.sh` then `cd sim && sim run --scenario scenario.yaml --timeou
 - **Open-loop replay.** The rocket does not react to the firmware. The CSV has only ~0.7 s of pad rows, so they
   are cycled until CSV time 0 plays at sim time 8 s.
 - **Peers** are register files, not the silicon: instant flash program/erase, always-ready data, chosen BMP390
-  NVM coefficients, constant magnetometer field, instant LoRa TX, no noise.
+  NVM coefficients, constant magnetometer field, LoRa airtime from the programmed registers but no RF, no noise.
 
 ## Sim-only build patch (`lora-pll2.patch`) and the PLL2 question
 
@@ -81,14 +119,52 @@ arming with dual deploy calls `error_fail_fast(ERROR_CONFIG_VALIDITY_ERROR)`. So
 igniter in this firmware version and APOGEE to DESCENT is the only deploy marker. This is a property of the
 firmware, not of the sim.
 
+## LoRa stall (the flight loop after 4.06 s)
+
+Evidence, all from `--trace-symbol` / `--trace-interrupts` / `--trace-memory`:
+
+1. After the last calibration `sensor_dump` (4.0637 s) the main loop reaches `lora_fsm_update(SYNCHRONOUS)` once,
+   then `flash_is_flash_busy` -> `flash_get_status` -> `HAL_SPI_Transmit` on SPI2 (10 ms HAL timeout) and never returns.
+2. From 4.0638 s SPI4 (IRQ84, priority 2) runs back to back: 779,191 entries to 7 s, zero idle gaps in a 5.5 ms
+   window. SysTick (priority 15) stops (4063 ticks in 7 s), so the HAL timeout in (1) never expires.
+3. The interrupt chain is the firmware's async LoRa TX FSM (`lora_async.c`). In `LORA_TX_STATE_TRANSMITTING` it reads
+   `OPERATION_MODE` over SPI4 from the read-complete callback until it sees STANDBY, with no delay. The driver has no
+   DIO0 EXTI (`HAL_NVIC_EnableIRQ( [lora placeholder] )` in `sensor.c`), so there is no TxDone pin for a peer to drive.
+4. Peer fault, fixed: the old SX1276 peer never left TX mode, so the poll never ended. `sx1276_peer.py` now computes
+   airtime from the registers the firmware programmed (SF, BW, CR, preamble, payload, CRC/header bits; datasheet
+   formula; 92.4 ms for the firmware's 48-byte packets) and returns to STANDBY with TxDone set. The FSM then chains
+   one packet after another (TX start/done every 92.5 ms from 4.064 s), still entirely in interrupt context: the loop
+   stays starved.
+5. Per-read interrupt cost: about 4 SPI4 interrupts of about 3.8 us each per 15 us read, i.e. the CPU is saturated.
+   Whether silicon leaves the main loop idle time here depends on the real cost of `HAL_SPI_IRQHandler` and the FSM
+   callback (cache, flash wait states) against the real SPI4 byte time; neither was measured (`unverified`). About one
+   SPI4 entry in four finds no enabled flag set (SR = TXP|TXTF with only DXP/EOT enabled): either NVIC re-pend
+   semantics in the sim or the model holding the line a moment longer than silicon would; not resolved
+   (`unverified`). A model gap is a candidate, not proven.
+
+**Labelled fallback (`SDR_LORA=0`):** `sst25_peer.py` leaves WIRELESS_TRANSMISSION (enabled_features bit 4) out of the
+preset block, so `lora_fsm_update` is never called. This is a MODELED SIMPLIFICATION that removes LoRa telemetry from
+the flight; it hides the stall, it does not fix it. Default (`SDR_LORA=1`) keeps LoRa on and stalls.
+
+## Other findings
+
+- The CSV's first ~0.7 s of "pad" rows included the boost start (ax 45 m/s^2 at 0.653 s); cycling them tripped
+  LAUNCH_DETECT -> ASCENT at 4.5 s. `PAD_END_S` is now 0.6 s. `SDR_LAUNCH_S` is 6 (LAUNCH_DETECT is entered at 3.53 s;
+  the old note said 12).
+- The firmware leaves ASCENT for APOGEE at CSV t 1.90 s (`nav_pof` = NAV_DESCENT) while the replayed pressure is still
+  falling and its own `velo_mag` is about 150 m/s; the CSV's real apogee is about 18 s. Cause not investigated
+  (`unverified`); candidates are the nav filter on the replayed data or an axis-convention mismatch of the CSV.
+- Frame time `t_ms` counts from `launch_detect_start_time`, set at the last calibration sample (sim 4.064 s), not at
+  LAUNCH_DETECT entry (3.53 s). `plot_flight.py` aligns on 4.064 s (`SDR_FRAME0_S`); the overlay confirms it.
+- The CSV is open loop (MODELED SIMPLIFICATION): no plant reacts to the firmware, and whether it is a recorded flight
+  is `unverified`. Dual deploy cannot fire in this firmware version (above).
+
 ## Open
 
-- Flight loop silent after 4.06 s virtual (LAUNCH_DETECT reached, no further `sensor_dump`). Next step: find the
-  PC it waits at (candidate: the async LoRa FSM TX completion, which needs SPI4 interrupt-mode transfers and
-  `lora_fsm_update` callbacks).
-- Then: launch detect through descent, decode the flash log, plot. The CSV must start after LAUNCH_DETECT is
-  entered (`SDR_LAUNCH_S=12`), not at 8 s.
-- A full 196 s virtual run may exceed the 5-minute wall rule; if so it will be truncated after descent and say so.
+- Decide model-vs-firmware for the SPI4 interrupt saturation (item 5): needs retired instructions per interrupt on
+  this ELF against the silicon cycle table, and the spurious-entry check.
+- The 512 KB flash holds 8.9 s of the CSV at the firmware's logging rate; the rest of the 188 s is only in the stimulus.
+- Why APOGEE at 1.9 s.
 
 ## Licence
 
