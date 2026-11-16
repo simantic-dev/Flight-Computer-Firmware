@@ -3,23 +3,31 @@
 # EWSR 0x50, WRSR 0x01, WREN 0x06, WRDI 0x04, RDID 0x90, JEDEC 0x9F. Backed by a file (mmap) so the flight
 # log can be decoded after the run; blank = 0xFF.
 # MODELED SIMPLIFICATION: programming and erase complete instantly (BUSY never set).
-import mmap, os
+import mmap, os, struct
 
 SIZE = 0x80000
 PATH = os.environ.get("SDR_FLASH", "out/flash.bin")
 os.makedirs(os.path.dirname(PATH) or ".", exist_ok=True)
+# Preset at flash address 0 (app/rev2/flash_appa.c read_preset: save bit 1, pad, PRESET_DATA 96 B). Stands for what
+# the team's configuration tool writes before flight. Values are set_default_configs() plus WIRELESS_TRANSMISSION
+# (bit 4) and a valid LoRa preset (SF7, 125 kHz, 4/5, 915 MHz); a blank flash makes read_preset scan all 512 KB
+# in 98-byte reads (551k SPI transactions) and leaves preset_data blank.
+_cfg = struct.pack("<IIHHHBBBxHBBH6f", 0x01 | 0x40 | 0x10, 0xFFFFFFFF, 50, 30000, 300, 2, 5, 5, 0, 7, 0, 4000,
+                   *([0.0] * 6))
+_preset = struct.pack("<I", 0) + _cfg + struct.pack("<BBBBI", 7, 7, 5, 0, 915000) + bytes(24 + 8 + 4)
+assert len(_cfg) == 48 and len(_preset) == 96
 with open(PATH, "wb") as f:
-    f.write(b"\xff" * SIZE)
+    f.write(b"\x01\x00" + _preset + b"\xff" * (SIZE - 98))
 MEM = mmap.mmap(os.open(PATH, os.O_RDWR), SIZE)
 
 
 class Slave:
     def __init__(self, ctx):
-        self.ctx, self.sr, self.wel, self.aai = ctx, 0x1C, False, False
+        self.ctx, self.sr, self.wel, self.aai, self.addr = ctx, 0x1C, False, False, 0
         self._reset()
 
     def _reset(self):
-        self.cmd, self.n, self.addr, self.pend = None, 0, 0, b""
+        self.cmd, self.n, self.pend = None, 0, b""  # addr persists: AAI continuation frames carry none
 
     def _prog(self, a, v):
         if a < SIZE:
@@ -50,7 +58,7 @@ class Slave:
         if c == 0x90:
             return (0, 0, 0, 0xBF, 0x8D)[min(self.n - 1, 4)] if self.n > 3 else 0
         if c in (0x20, 0x52, 0xD8, 0x02, 0xAD):
-            if self.n <= 3:
+            if self.n <= 3 and not (c == 0xAD and self.aai):  # AAI continuation frames carry no address
                 self.addr = b if self.n == 1 else (self.addr << 8 | b)
             elif c == 0x02:
                 if self.wel:

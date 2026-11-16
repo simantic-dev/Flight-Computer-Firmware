@@ -11,4 +11,6 @@ test/trace-report.md
 .vscode/*
 Unity
 lib
-mod
+mod__pycache__/
+sim/out/
+sim/build/
