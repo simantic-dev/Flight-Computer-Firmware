@@ -1,0 +1,15 @@
+diff --git a/init/rev2/config/Src/stm32h7xx_hal_msp.c b/init/rev2/config/Src/stm32h7xx_hal_msp.c
+index a8de4de..bed7dbc 100644
+--- a/init/rev2/config/Src/stm32h7xx_hal_msp.c
++++ b/init/rev2/config/Src/stm32h7xx_hal_msp.c
+@@ -325,6 +325,10 @@ else if( hspi->Instance==SPI4 ) /* Flash SPI Initialization */
+   	/* Initializes the peripherals clock */
+     PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_SPI4;
+     PeriphClkInitStruct.Spi45ClockSelection = RCC_SPI45CLKSOURCE_PLL2;
++    /* SIM PATCH: same PLL2 values as the SPI2 branch above */
++    PeriphClkInitStruct.PLL2.PLL2M = 2; PeriphClkInitStruct.PLL2.PLL2N = 16; PeriphClkInitStruct.PLL2.PLL2P = 4;
++    PeriphClkInitStruct.PLL2.PLL2Q = 2; PeriphClkInitStruct.PLL2.PLL2R = 2;
++    PeriphClkInitStruct.PLL2.PLL2RGE = RCC_PLL2VCIRANGE_3; PeriphClkInitStruct.PLL2.PLL2VCOSEL = RCC_PLL2VCOWIDE;
+     if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK)
+     {
+       error_fail_fast( ERROR_LORA_SPI_INIT_ERROR );

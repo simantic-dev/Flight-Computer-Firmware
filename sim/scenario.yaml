@@ -9,4 +9,5 @@ machines:
       - { name: imu,   type: i2c-device,  bus: i2c2, address: 0x68, script: peers/bmi270_peer.py }
       - { name: mag,   type: i2c-device,  bus: i2c2, address: 0x10, script: peers/bmm150_peer.py }
       - { name: flash, type: spi-device,  bus: spi2, cs: PB12,      script: peers/sst25_peer.py }
+      - { name: lora,  type: spi-device,  bus: spi4, cs: PC0,       script: peers/sx1276_peer.py }
       - { name: arm,   type: gpio-device, outputs: PD7,             script: peers/arm_switch_peer.py }
