@@ -7,7 +7,7 @@
 import bisect, csv, math, os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CSV = os.path.join(HERE, "..", "..", "emulator", "resources", "locked_in_flight.csv")
+CSV = os.path.join(HERE, "..", "data", "locked_in_flight.csv")
 LAUNCH_S = float(os.environ.get("SDR_LAUNCH_S", "8.0"))   # sim time at which CSV time 0 plays
 PAD_END_S = 0.6                                            # boost starts at csv t = 0.65 s (ax 45 m/s2), so the cycled pad rows end at 0.6 s
 

@@ -2,7 +2,7 @@
 machines:
   fc:
     mcu: STM32H743VG          # stand-in: sim has no STM32H750 (same die family, less flash)
-    elf: build/appa.elf
+    elf: fw/appa.elf
     overlay: fc.board
     parts:
       - { name: baro,  type: i2c-device,  bus: i2c1, address: 0x76, script: peers/bmp390_peer.py }
