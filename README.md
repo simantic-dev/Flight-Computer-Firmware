@@ -71,7 +71,7 @@ flowchart LR
   arm(["arm switch<br/>Python peer"]) -- "PD7: raised at 3 s" --> fc
   fc -- "SPI2 CS PB12: 118 B flight frames" --> flash(["SST25 flash<br/>Python peer, file-backed"])
   fc -- "SPI4 CS PC0: init only in demo (LoRa off)" --- lora(["SX1276 LoRa<br/>Python peer"])
-  flash -- "decode_flash.py" --> out["terminal: state, alt, pres, speed, accel"]
+  flash -- "decode_flash.py" --> out["terminal: flash log, trace hits, bus frames, debug_log"]
 ```
 
 Run it (needs `sim` on PATH, `curl -fsSL https://simantic.com/install | sh`, and the Arm GNU toolchain):
