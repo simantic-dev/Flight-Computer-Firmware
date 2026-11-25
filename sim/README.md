@@ -15,7 +15,7 @@ flight loop stalls after 4.06 s (cause below). Nothing here is a claim about sil
 
 ![flight log, animated](results/flight.gif)
 
-*Re-run on `sim` 0.10.8 (build 64f89c38), 2026-11-25, LoRa off, `SDR_LAUNCH_S=6`, `--timeout 16`: 16 s of virtual time in 32 s of wall time (about 2 s per virtual second, loaded laptop). The state trace is the same as in the table below to the millisecond (IDLE 0.925 s, CALIB 3.000 s, LAUNCH_DETECT 3.530 s, ASCENT 6.638 s, APOGEE 7.901 s, DESCENT 7.903 s) and the flash filled with 4442 frames. The animation plots what the firmware logged to the simulated flash (`decode_flash.py`), drawn by `sim/make_gif.py out/frames.csv out/trace.log results/flight.gif "sim 0.10.8"`. The stimulus is the CSV replayed open loop, so this checks the firmware's own state machine and logging, not a real flight.*
+*Re-run on `sim` 0.10.8 (build 64f89c38), 2026-11-25, LoRa off, `SDR_LAUNCH_S=6`, `--timeout 16`: 16 s of virtual time in 32 s of wall time (about 2 s per virtual second, loaded laptop). The state trace is the same as in the table below to the millisecond (IDLE 0.925 s, CALIB 3.000 s, LAUNCH_DETECT 3.530 s, ASCENT 6.638 s, APOGEE 7.901 s, DESCENT 7.903 s) and the flash filled with 4442 frames. The animation is a flight-computer dashboard: the flight-state chain with the virtual time each state was entered (from `--trace-symbol fc_state_update`), and altitude, velocity, acceleration and pressure as the firmware logged them to the simulated flash (`decode_flash.py`), drawn by `sim/make_gif.py out/frames.csv out/trace.log results/flight.gif 0.10.8`. Simulated on Simantic sim 0.10.8, virtual time, playback 1.00x. COAST is never entered in this run, and APOGEE is flagged at CSV t = 1.9 s while the replayed flight is still climbing (see below). The stimulus is the CSV replayed open loop, so this checks the firmware's own state machine and logging, not a real flight.*
 
 `results/flight_full.png` adds the whole 188 s CSV truth beside the logged window.
 
@@ -36,7 +36,7 @@ Whether that CSV is a recorded flight is `unverified`.
 Run: `sh sim/build.sh`, then
 `cd sim && SDR_LAUNCH_S=6 SDR_LORA=0 sim run --scenario scenario.yaml --timeout 196 --trace-symbol fc_state_update`
 (about 98 s wall on an idle machine), then `python3 decode_flash.py out/flash.bin > out/frames.csv` and
-`python plot_flight.py out/frames.csv <the --trace-symbol log> results` (needs matplotlib).
+`python plot_flight.py out/frames.csv <the --trace-symbol log> results` (needs matplotlib; the GIF needs only pillow and ffmpeg).
 `decode_flash.py` reads the 118-byte frames (layout from `flash_appa.c`; 4442 frames decoded, the values match the CSV).
 
 ```mermaid
