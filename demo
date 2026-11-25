@@ -1,0 +1,13 @@
+#!/bin/sh
+# Boots the Rev 2 flight firmware (app/rev2, STM32H743 stand-in) on the simulator with Python sensor peers replaying
+# locked_in_flight.csv, then prints the flight log the firmware wrote to flash, decoded (state, altitude, pressure, speed, accel).
+# Needs `sim` on PATH (or SIM=/path/to/sim) and sim/build.sh done. Full run and plots: see sim/README.md.
+set -eu
+SIM="${SIM:-sim}"
+cd "$(dirname "$0")/sim"
+command -v "$SIM" >/dev/null || { echo "sim not found. Install it: curl -fsSL https://simantic.com/install | sh" >&2; exit 1; }
+[ -f build/appa.elf ] || { echo "firmware missing: run sim/build.sh first" >&2; exit 1; }
+mkdir -p out
+echo "Rev 2 flight computer + BMP390/BMI270/BMM150/SST25/SX1276 peers: simulating 15 s ..."
+SDR_LAUNCH_S=6 SDR_LORA=0 "$SIM" run --scenario scenario.yaml --timeout 15 >out/demo.log 2>&1
+python3 demo_view.py out/flash.bin

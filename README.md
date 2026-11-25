@@ -43,3 +43,36 @@ The current generation SDR flight computer. Supports telemetry and data logging 
 #### Source code: app/rev3 
 
 The next generation SDR flight computer, which is in early development.
+
+## Demo
+
+![Rev 2 flight firmware on the simulator](media/flight-computer-demo.gif)
+
+The team's Rev 2 flight firmware (`app/rev2`) runs on a simulated STM32H743 (stand-in for the H750) with Python peers
+for the sensors; `./demo` prints the flight log the firmware wrote to its flash, decoded: state, barometric altitude,
+pressure, speed and acceleration. Every sensor value is a **stand-in**: the peers replay `emulator/resources/locked_in_flight.csv`
+open loop (nothing reacts to the firmware), and LoRa telemetry is switched off (`SDR_LORA=0`) because the flight loop
+stalls with it on. The states, altitude, speed and frame logging are the firmware's own computation. In this run the
+firmware leaves ASCENT for APOGEE at log time 3.9 s while the replayed altitude is still climbing; that is unexplained
+(see `sim/README.md`).
+
+```mermaid
+flowchart LR
+  fc["Rev 2 flight firmware<br/>STM32H743 (H750 stand-in)"]
+  baro(["BMP390 baro<br/>Python peer"]) -- "I2C1 0x76: pressure, temperature" --> fc
+  imu(["BMI270 IMU<br/>Python peer"]) -- "I2C2 0x68: accel, gyro" --> fc
+  mag(["BMM150 mag<br/>Python peer"]) -- "I2C2 0x10: field (constant)" --> fc
+  arm(["arm switch<br/>Python peer"]) -- "PD7: raised at 3 s" --> fc
+  fc -- "SPI2 CS PB12: 118 B flight frames" --> flash(["SST25 flash<br/>Python peer, file-backed"])
+  fc -- "SPI4 CS PC0: init only in demo (LoRa off)" --- lora(["SX1276 LoRa<br/>Python peer"])
+  flash -- "decode_flash.py" --> out["terminal: state, alt, pres, speed, accel"]
+```
+
+Run it (needs `sim` on PATH, `curl -fsSL https://simantic.com/install | sh`, and the Arm GNU toolchain):
+
+```
+git submodule update --init --recursive --depth 1
+sh sim/build.sh
+./demo        # about 1-2 min wall for 15 virtual s
+```
+
