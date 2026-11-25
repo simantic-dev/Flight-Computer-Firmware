@@ -6,11 +6,12 @@ Set Height 740
 Set FontSize 16
 Set Padding 18
 Set Framerate 10
-Set PlaybackSpeed 6
+Set PlaybackSpeed 4
 Env PS1 "$ "
 Hide
 Type 'export PATH="$HOME/.local/bin:$PATH" && cd "$(git rev-parse --show-toplevel)" && clear' Enter
 Show
 Type "./demo" Enter
-Wait+Screen@900s /frames logged by the firmware/
-Sleep 60s
+Wait+Line@900s /^\$$/
+Sleep 40s
+# The recorded GIF was then re-timed with ffmpeg (scrolling part sped up to about 18 s, 10 s hold kept): recording time varied 4x with machine load.

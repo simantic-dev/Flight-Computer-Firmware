@@ -48,13 +48,19 @@ The next generation SDR flight computer, which is in early development.
 
 ![Rev 2 flight firmware on the simulator](media/flight-computer-demo.gif)
 
-The team's Rev 2 flight firmware (`app/rev2`) runs on a simulated STM32H743 (stand-in for the H750) with Python peers
-for the sensors; `./demo` prints the flight log the firmware wrote to its flash, decoded: state, barometric altitude,
-pressure, speed and acceleration. Every sensor value is a **stand-in**: the peers replay `emulator/resources/locked_in_flight.csv`
-open loop (nothing reacts to the firmware), and LoRa telemetry is switched off (`SDR_LORA=0`) because the flight loop
-stalls with it on. The states, altitude, speed and frame logging are the firmware's own computation. In this run the
-firmware leaves ASCENT for APOGEE at log time 3.9 s while the replayed altitude is still climbing; that is unexplained
-(see `sim/README.md`).
+The team's Rev 2 flight firmware (`app/rev2`) runs on a simulated STM32H743 (stand-in for the H750) with Python peers for
+the sensors, and `./demo` streams every log channel the firmware has, with the original text and virtual timestamps:
+
+- **Flight log in flash**: the 118-byte frames the firmware writes to its SST25 flash, decoded as they appear (`(flash log)` lines: state, barometric altitude, pressure, speed, acceleration).
+- **Sim trace hits** on `flash_init`, `imu_init`, `telemetry_init`, `fc_state_update` (r0 is the new state: 1 IDLE, 2 CALIB, 3 LAUNCH_DETECT, 4 ASCENT, 6 APOGEE, 7 DESCENT) and `error_fail_fast` (never hit), verbatim.
+- **I2C bus frames** from `--frames` (the first few, verbatim), and the peers' own prints (`[imu] ...`).
+- **The firmware's `debug_log` messages** (`[INFO]: State Change: 3->4`, calibration messages). Rev 2 has no console: `debug_writer` in `main.c` is a stub that drops them, so nothing is transmitted on silicon or in the sim. `./demo` recovers the text from the byte writes into `debug_handle` (`--trace-memory`) and lists it at the end of the run, because the sim only writes those records when the run ends.
+
+There is no UART, ITM or RTT output on this firmware. Every sensor value is a **stand-in**: the peers replay
+`emulator/resources/locked_in_flight.csv` open loop (nothing reacts to the firmware), and LoRa telemetry is switched off
+(`SDR_LORA=0`) because the flight loop stalls with it on. The states, altitude, speed and frame logging are the firmware's
+own computation. The firmware leaves ASCENT for APOGEE at log time 3.9 s while the replayed altitude is still climbing;
+that is unexplained (see `sim/README.md`).
 
 ```mermaid
 flowchart LR
