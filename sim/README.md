@@ -13,6 +13,10 @@ flight loop stalls after 4.06 s (cause below). Nothing here is a claim about sil
 ![flight](results/flight.png)
 ![states](results/states.png)
 
+![flight log, animated](results/flight.gif)
+
+*Re-run on `sim` 0.10.8 (build 64f89c38), 2026-11-25, LoRa off, `SDR_LAUNCH_S=6`, `--timeout 16`: 16 s of virtual time in 32 s of wall time (about 2 s per virtual second, loaded laptop). The state trace is the same as in the table below to the millisecond (IDLE 0.925 s, CALIB 3.000 s, LAUNCH_DETECT 3.530 s, ASCENT 6.638 s, APOGEE 7.901 s, DESCENT 7.903 s) and the flash filled with 4442 frames. The animation plots what the firmware logged to the simulated flash (`decode_flash.py`), drawn by `sim/make_gif.py out/frames.csv out/trace.log results/flight.gif "sim 0.10.8"`. The stimulus is the CSV replayed open loop, so this checks the firmware's own state machine and logging, not a real flight.*
+
 `results/flight_full.png` adds the whole 188 s CSV truth beside the logged window.
 
 ## What runs
